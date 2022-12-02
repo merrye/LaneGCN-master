@@ -65,7 +65,7 @@ class Conv1d(nn.Module):
 class Linear(nn.Module):
     def __init__(self, n_in, n_out, norm='GN', ng=32, act=True):
         super(Linear, self).__init__()
-        assert(norm in ['GN', 'BN', 'SyncBN'])
+        assert(norm in ['GN', 'BN', 'LN', 'SyncBN'])
 
         self.linear = nn.Linear(n_in, n_out, bias=False)
         
@@ -73,6 +73,8 @@ class Linear(nn.Module):
             self.norm = nn.GroupNorm(gcd(ng, n_out), n_out)
         elif norm == 'BN':
             self.norm = nn.BatchNorm1d(n_out)
+        elif norm == 'LN':
+            self.norm = nn.LayerNorm(n_out)
         else:
             exit('SyncBN has not been added!')
         
@@ -193,7 +195,7 @@ class Res1d(nn.Module):
 class LinearRes(nn.Module):
     def __init__(self, n_in, n_out, norm='GN', ng=32):
         super(LinearRes, self).__init__()
-        assert(norm in ['GN', 'BN', 'SyncBN'])
+        assert(norm in ['GN', 'BN', 'LN', 'SyncBN'])
 
         self.linear1 = nn.Linear(n_in, n_out, bias=False)
         self.linear2 = nn.Linear(n_out, n_out, bias=False)
@@ -205,6 +207,9 @@ class LinearRes(nn.Module):
         elif norm == 'BN':
             self.norm1 = nn.BatchNorm1d(n_out)
             self.norm2 = nn.BatchNorm1d(n_out)
+        elif norm == 'LN':
+            self.norm1 = nn.LayerNorm(n_out)
+            self.norm2 = nn.LayerNorm(n_out)
         else:   
             exit('SyncBN has not been added!')
 
@@ -217,6 +222,10 @@ class LinearRes(nn.Module):
                 self.transform = nn.Sequential(
                     nn.Linear(n_in, n_out, bias=False),
                     nn.BatchNorm1d(n_out))
+            elif norm == 'LN':
+                self.transform = nn.Sequential(
+                    nn.Linear(n_in, n_out, bias=False),
+                    nn.LayerNorm(n_out))
             else:
                 exit('SyncBN has not been added!')
         else:
@@ -236,6 +245,7 @@ class LinearRes(nn.Module):
 
         out = self.relu(out)
         return out
+
 
 
 class Null(nn.Module):
