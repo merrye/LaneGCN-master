@@ -29,7 +29,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
 
 from data import ArgoTestDataset
-from utils import Logger, load_pretrain
+from utils import gpu, Logger, load_pretrain
 
 
 root_path = os.path.dirname(os.path.abspath(__file__))
@@ -59,7 +59,8 @@ def main():
     # load pretrain model
     ckpt_path = args.weight
     if not os.path.isabs(ckpt_path):
-        ckpt_path = os.path.join(config["save_dir"], ckpt_path)
+        # ckpt_path = os.path.join(config["save_dir"], ckpt_path)
+        ckpt_path = os.path.join(ckpt_path)
     ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
     load_pretrain(net, ckpt["state_dict"])
     net.eval()
@@ -81,6 +82,7 @@ def main():
     cities = {}
     for ii, data in tqdm(enumerate(data_loader)):
         data = dict(data)
+        data = gpu(data)
         with torch.no_grad():
             output = net(data)
             results = [x[0:1].detach().cpu().numpy() for x in output["reg"]]
