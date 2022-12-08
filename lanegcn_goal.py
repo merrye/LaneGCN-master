@@ -46,18 +46,18 @@ config["val_workers"] = config["workers"]
 """Dataset"""
 # Raw Dataset
 config["train_split"] = os.path.join(
-    root_path, "dataset/train_1"
+    root_path, "dataset/train_4"
 )
-config["val_split"] = os.path.join(root_path, "dataset/val/data_1")
-config["test_split"] = os.path.join(root_path, "dataset/test_obs/data")
+config["val_split"] = os.path.join(root_path, "dataset/val_4" )
+config["test_split"] = os.path.join(root_path, "dataset/test_obs")
 
 # Preprocessed Dataset
 config["preprocess"] = True # whether use preprocess or not
 config["preprocess_train"] = os.path.join(
-    root_path, "dataset","preprocess", "train_crs_dist6_angle90_1.p"
+    root_path, "dataset","preprocess", "train_crs_dist6_angle90_4.p"
 )
 config["preprocess_val"] = os.path.join(
-    root_path,"dataset", "preprocess", "val_crs_dist6_angle90_1.p"
+    root_path,"dataset", "preprocess", "val_crs_dist6_angle90_4.p"
 )
 config['preprocess_test'] = os.path.join(root_path, "dataset",'preprocess', 'test_test.p')
 

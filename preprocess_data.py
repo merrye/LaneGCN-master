@@ -53,9 +53,9 @@ def main():
 
 
 
-    val(config)
-    # test(config)
-    train(config)
+    # val(config)
+    test(config)
+    # train(config)
 
 
 def train(config):
@@ -172,7 +172,7 @@ def test(config):
     dataset = Dataset(config["test_split"], config, train=False)
     test_loader = DataLoader(
         dataset,
-        batch_size=config["val_batch_size"],
+        batch_size=128, # config["val_batch_size"],
         num_workers=config["val_workers"],
         shuffle=False,
         collate_fn=collate_fn,
@@ -264,6 +264,7 @@ def modify(config, data_loader, save):
     f = open(os.path.join(root_path, 'preprocess', save), 'wb')
     pickle.dump(store, f, protocol=pickle.HIGHEST_PROTOCOL)
     f.close()
+
 
 class PreprocessDataset():
     def __init__(self, split, config, train=True):

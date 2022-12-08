@@ -63,6 +63,7 @@ def main():
         ckpt_path = os.path.join(ckpt_path)
     ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
     load_pretrain(net, ckpt["state_dict"])
+    net = net.cuda()
     net.eval()
 
     # Data loader for evaluation

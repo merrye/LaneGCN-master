@@ -17,8 +17,8 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from data import ArgoDataset, collate_fn
 from utils import gpu, to_long,  Optimizer, StepLR
 
-from layers import Conv1d, Res1d, Linear, LinearRes
-from UNet import UNetRes
+from layers import Conv1d, Res1d, Linear, LinearRes, Null, UNet, PointerwiseFeedforward
+from GoalTF import GoalTF
 from numpy import float64, ndarray
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
@@ -64,8 +64,8 @@ config["preprocess_val"] = os.path.join(
 config['preprocess_test'] = os.path.join(root_path, "dataset",'preprocess', 'test_test.p')
 
 """Train"""
-config["display_iters"] = 205942
-config["val_iters"] = 205942 * 2
+config["display_iters"] = len(os.listdir(config["train_split"])) # 205942
+config["val_iters"] = len(os.listdir(config["train_split"])) * 2 # 205942 * 2
 config["save_freq"] = 1.0
 config["epoch"] = 0
 config["horovod"] = True
@@ -104,9 +104,9 @@ class Net(nn.Module):
         self.config = config
         n_actor = config['n_actor']
 
-        self.actor_unet = UNetRes(
-            enc_chs=(3, n_actor // 2, n_actor // 2, n_actor),
-            dec_chs=(n_actor, n_actor // 2, n_actor // 2),
+        self.actor_unet = UNet(
+            enc_chs=(3, n_actor, n_actor, n_actor * 2),
+            dec_chs=(n_actor * 2, n_actor, n_actor),
             out_chs=n_actor
         )
         self.map_net = MapNet(config)
@@ -215,7 +215,6 @@ def graph_gather(graphs):
             ]
             graph[k1][k2] = torch.cat(temp)
     return graph
-
 
 class MapNet(nn.Module):
     """
@@ -504,18 +503,17 @@ class GoalNet(nn.Module):
         self.config = config
         n_actor = config["n_actor"]
 
-        # version 1: use Transformer
-        self.input_embedding = Linear(n_actor, n_actor, norm='LN')
-        self.temporal_encoder_layer = TransformerEncoderLayer(
-            d_model=n_actor,
-            nhead=8,
-            dim_feedforward=2048)
-        self.temporal_encoder = TransformerEncoder(
-            self.temporal_encoder_layer,
-            num_layers=1)
-        self.output_layer = nn.Linear(n_actor, 2)
+        self.query_embed = nn.Embedding(config['num_goal_mod'], n_actor)
+        self.query_embed.weight.requires_grad == False
+        nn.init.orthogonal_(self.query_embed.weight)
+        self.goal_tf = GoalTF(d_model=n_actor)
+        self.goal_out = nn.Sequential(
+            LinearRes(n_actor, n_actor, norm="LN", ng=1),
+            nn.Linear(n_actor, 2)
+        )
 
         self.att_dest = AttDest(n_actor)
+        self.cls_FFN = PointerwiseFeedforward(n_actor, 2 * n_actor)
         self.cls = nn.Sequential(
             LinearRes(n_actor, n_actor, norm="GN", ng=1),
             nn.Linear(n_actor, 1)
@@ -523,27 +521,26 @@ class GoalNet(nn.Module):
         self.softmax = nn.Softmax(dim=1)
 
     def forward(self, actors: Tensor, actor_idcs, actor_ctrs) -> Tensor:
+        num_goal_mod = self.config['num_goal_mod']
         batch_size = len(actor_idcs)
-        input_size = actors.size(1)
+        agents_num, input_size = actors.size()
         idxs = [idcs.shape[0] for idcs in actor_idcs]
         max_agents = max(idxs)
         
         goal_input = torch.zeros((batch_size, max_agents, input_size), device=actors.device)
-        for i in range(batch_size): goal_input[i, 0: idxs[i], :] = actors[actor_idcs[i]]
+        for i in range(batch_size):
+            goal_input[i, 0: idxs[i], :] = actors[actor_idcs[i]]
 
-        goals = []
-        for _ in range(self.config['num_goal_mod']):
-            input_embedded = self.input_embedding(goal_input)
-            temporal_output = self.temporal_encoder(input_embedded)
-            output = self.output_layer(temporal_output)
+        goal_input = torch.cat([goal_input.unsqueeze(2) for _ in range(num_goal_mod)], dim=2)
+        query_batches = self.query_embed.weight.view(
+            1, 1, *self.query_embed.weight.shape).repeat(*goal_input.shape[:2], 1, 1)
 
-            goal = [output[i, 0: idxs[i], :] for i in range(batch_size)]
-            goal = torch.cat([x for x in goal], 0)
-
-            goals.append(goal)
-
-        reg = torch.cat([x.unsqueeze(1) for x in goals], 1)
-        reg = reg.view(reg.size(0), reg.size(1), 2)
+        out = self.goal_tf(goal_input, query_batches)
+        out = self.goal_out(out) # [batch_size, max_agents, 3, 2]
+        reg = torch.zeros((agents_num, num_goal_mod, 2), device=actors.device)
+        for i in range(num_goal_mod):
+            for batch_id in range(batch_size):
+                reg[actor_idcs[batch_id], i, :] = out[batch_id, 0: idxs[batch_id], i, :]
 
         for i in range(batch_size):
             idcs = actor_idcs[i]
@@ -552,7 +549,8 @@ class GoalNet(nn.Module):
 
         dest_ctrs = reg.detach()
         feats = self.att_dest(actors, torch.cat(actor_ctrs, 0), dest_ctrs)
-        cls = self.cls(feats).view(-1, self.config["num_goal_mod"])
+        feats = self.cls_FFN(feats)
+        cls = self.cls(feats).view(-1, num_goal_mod)
         cls = self.softmax(cls)
         
         cls, sort_idcs = cls.sort(1, descending=True)
@@ -613,13 +611,19 @@ class PredNet(nn.Module):
         for i in range(config["num_mods"]):
             pred.append(
                 nn.Sequential(
-                    LinearRes(n_actor, n_actor, norm=norm, ng=ng),
-                    nn.Linear(n_actor, 2 * config["num_preds"]),
+                    nn.Linear(n_actor, n_actor * 2, bias=True),
+                    nn.LayerNorm(n_actor * 2),
+                    nn.ReLU(),
+                    nn.Linear(n_actor * 2, n_actor, bias=True),
+                    nn.Linear(n_actor, 2 * config["num_preds"], bias=True)
+                    # LinearRes(n_actor, n_actor, norm=norm, ng=ng),
+                    # nn.Linear(n_actor, 2 * config["num_preds"]),
                 )
             )
         self.pred = nn.ModuleList(pred)
 
         self.att_dest = AttDest(n_actor)
+        self.cls_FFN = PointerwiseFeedforward(n_actor, 2 * n_actor)
         self.cls = nn.Sequential(
             LinearRes(n_actor, n_actor, norm=norm, ng=ng), nn.Linear(n_actor, 1)
         )
@@ -638,6 +642,7 @@ class PredNet(nn.Module):
 
         dest_ctrs = reg[:, :, -1].detach()
         feats = self.att_dest(actors, torch.cat(actor_ctrs, 0), dest_ctrs)
+        feats = self.cls_FFN(feats)
         cls = self.cls(feats).view(-1, self.config["num_mods"])
 
         cls, sort_idcs = cls.sort(1, descending=True)
