@@ -17,8 +17,8 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from data import ArgoDataset, collate_fn
 from utils import gpu, to_long,  Optimizer, StepLR
 
-from layers import Conv1d, Res1d, Linear, LinearRes
 from UNet import UNetRes
+from layers import Linear, LinearRes, MLP, PointerwiseFeedforward
 from numpy import float64, ndarray
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
@@ -107,7 +107,7 @@ class Net(nn.Module):
         self.actor_unet = UNetRes(
             enc_chs=(3, n_actor // 2, n_actor // 2, n_actor),
             dec_chs=(n_actor, n_actor // 2, n_actor // 2),
-            out_chs=n_actor
+            out_chs=n_actor // 2
         )
         self.map_net = MapNet(config)
 
@@ -505,7 +505,7 @@ class GoalNet(nn.Module):
         n_actor = config["n_actor"]
 
         # version 1: use Transformer
-        self.input_embedding = Linear(n_actor, n_actor, norm='LN')
+        self.input_embedding = MLP(n_actor, n_actor, n_actor)
         self.temporal_encoder_layer = TransformerEncoderLayer(
             d_model=n_actor,
             nhead=8,
@@ -516,6 +516,7 @@ class GoalNet(nn.Module):
         self.output_layer = nn.Linear(n_actor, 2)
 
         self.att_dest = AttDest(n_actor)
+        self.cls_FFN = PointerwiseFeedforward(n_actor, 2 * n_actor)
         self.cls = nn.Sequential(
             LinearRes(n_actor, n_actor, norm="GN", ng=1),
             nn.Linear(n_actor, 1)
@@ -552,6 +553,7 @@ class GoalNet(nn.Module):
 
         dest_ctrs = reg.detach()
         feats = self.att_dest(actors, torch.cat(actor_ctrs, 0), dest_ctrs)
+        feats = self.cls_FFN(feats)
         cls = self.cls(feats).view(-1, self.config["num_goal_mod"])
         cls = self.softmax(cls)
         
@@ -620,6 +622,7 @@ class PredNet(nn.Module):
         self.pred = nn.ModuleList(pred)
 
         self.att_dest = AttDest(n_actor)
+        self.cls_FFN = PointerwiseFeedforward(n_actor, 2 * n_actor)
         self.cls = nn.Sequential(
             LinearRes(n_actor, n_actor, norm=norm, ng=ng), nn.Linear(n_actor, 1)
         )
@@ -638,6 +641,7 @@ class PredNet(nn.Module):
 
         dest_ctrs = reg[:, :, -1].detach()
         feats = self.att_dest(actors, torch.cat(actor_ctrs, 0), dest_ctrs)
+        feats = self.cls_FFN(feats)
         cls = self.cls(feats).view(-1, self.config["num_mods"])
 
         cls, sort_idcs = cls.sort(1, descending=True)

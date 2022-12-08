@@ -16,7 +16,7 @@ from torch.nn import functional as F
 from data import ArgoDataset, collate_fn
 from utils import gpu, to_long,  Optimizer, StepLR
 
-from layers import Conv1d, Res1d, Linear, LinearRes, Null, Encoder, Decoder
+from layers import Conv1d, Res1d, Linear, LinearRes, Null
 from numpy import float64, ndarray
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 

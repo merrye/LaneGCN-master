@@ -253,6 +253,51 @@ class Null(nn.Module):
     def forward(self, x):
         return x
 
+class PointerwiseFeedforward(nn.Module):
+    """
+    Implements FFN equation.
+    """
+
+    def __init__(self, d_model, d_ff, dropout=0.1):
+        super(PointerwiseFeedforward, self).__init__()
+        self.w_1 = nn.Linear(d_model, d_ff, bias=True)
+        self.w_2 = nn.Linear(d_ff, d_model, bias=True)
+        self.dropout = nn.Dropout(dropout)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        return self.w_2(self.dropout(self.relu(self.w_1(x))))
+
+class LayerNorm(nn.Module):
+    r"""
+    Layer normalization.
+    """
+
+    def __init__(self, hidden_size, eps=1e-5):
+        super(LayerNorm, self).__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.bias = nn.Parameter(torch.zeros(hidden_size))
+        self.variance_epsilon = eps
+
+    def forward(self, x):
+        u = x.mean(-1, keepdim=True)
+        s = (x - u).pow(2).mean(-1, keepdim=True)
+        x = (x - u) / torch.sqrt(s + self.variance_epsilon)
+        return self.weight * x + self.bias
+
+class MLP(nn.Module):
+    def __init__(self, hidden_size, out_features=None):
+        super(MLP, self).__init__()
+        if out_features is None:
+            out_features = hidden_size
+        self.linear = nn.Linear(hidden_size, out_features)
+        self.layer_norm = LayerNorm(out_features)
+
+    def forward(self, hidden_states):
+        hidden_states = self.linear(hidden_states)
+        hidden_states = self.layer_norm(hidden_states)
+        hidden_states = torch.nn.functional.relu(hidden_states)
+        return hidden_states
 
 def linear_interp(x, n_max):
     """Given a Tensor of normed positions, returns linear interplotion weights and indices.
