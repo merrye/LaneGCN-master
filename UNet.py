@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import torchvision.transforms as TF
 
 from layers import Res1d
 

@@ -301,21 +301,6 @@ def preprocess(graph, cross_dist, cross_angle=None):
     wi = torch.arange(num_nodes).long().to(dist.device).view(1, -1).repeat(num_nodes, 1).view(-1)
     row_idcs = torch.arange(num_nodes).long().to(dist.device)
 
-    if cross_angle is not None:
-        f1 = graph['feats'][hi]
-        f2 = graph['ctrs'][wi] - graph['ctrs'][hi]
-        t1 = torch.atan2(f1[:, 1], f1[:, 0])
-        t2 = torch.atan2(f2[:, 1], f2[:, 0])
-        dt = t2 - t1
-        m = dt > 2 * np.pi
-        dt[m] = dt[m] - 2 * np.pi
-        m = dt < -2 * np.pi
-        dt[m] = dt[m] + 2 * np.pi
-        mask = torch.logical_and(dt > 0, dt < config['cross_angle'])
-        left_mask = mask.logical_not()
-        mask = torch.logical_and(dt < 0, dt > -config['cross_angle'])
-        right_mask = mask.logical_not()
-
     pre = graph['pre_pairs'].new().float().resize_(num_lanes, num_lanes).zero_()
     pre[graph['pre_pairs'][:, 0], graph['pre_pairs'][:, 1]] = 1
     suc = graph['suc_pairs'].new().float().resize_(num_lanes, num_lanes).zero_()
@@ -330,8 +315,6 @@ def preprocess(graph, cross_dist, cross_angle=None):
         left_dist = dist.clone()
         mask = mat[lane_idcs[hi], lane_idcs[wi]].logical_not()
         left_dist[hi[mask], wi[mask]] = 1e6
-        if cross_angle is not None:
-            left_dist[hi[left_mask], wi[left_mask]] = 1e6
 
         min_dist, min_idcs = left_dist.min(1)
         mask = min_dist < cross_dist
@@ -364,8 +347,6 @@ def preprocess(graph, cross_dist, cross_angle=None):
         right_dist = dist.clone()
         mask = mat[lane_idcs[hi], lane_idcs[wi]].logical_not()
         right_dist[hi[mask], wi[mask]] = 1e6
-        if cross_angle is not None:
-            right_dist[hi[right_mask], wi[right_mask]] = 1e6
 
         min_dist, min_idcs = right_dist.min(1)
         mask = min_dist < cross_dist
@@ -406,13 +387,6 @@ def to_long(data):
     if torch.is_tensor(data) and data.dtype == torch.int16:
         data = data.long()
     return data
-
-
-def worker_init_fn(pid):
-    np_seed = hvd.rank() * 1024 + int(pid)
-    np.random.seed(np_seed)
-    random_seed = np.random.randint(2 ** 32 - 1)
-    random.seed(random_seed)
 
 
 if __name__ == "__main__":
